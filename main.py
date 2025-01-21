@@ -38,7 +38,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.api = api
 
-        self.setWindowTitle("SensorPush Desktop (Local Time + RangeBar)")
+        self.setWindowTitle("SensorPush Desktop (Local Time + RangeBar + Favorites)")
 
         # A tabbed UI
         self.tabs = QTabWidget()
@@ -76,12 +76,43 @@ class MainWindow(QMainWindow):
             # update graph tab combos
             self.graph_tab.populate_sensors(sensors)
 
+            # NEW (PER-SENSOR RANGES) ---------------------
+            # Example dictionary of ranges keyed by sensor_id.
+            # Use actual IDs or names that match your environment.
+            # Each sensor_id has a dict of "temp_range", "temp_good",
+            # "hum_range", "hum_good", "vpd_range", and "vpd_good".
+            SENSOR_RANGES = {
+                # Example: sensor ID "ABC123"
+                "ABC123": {
+                    "temp_range": (-4, 120),
+                    "temp_good": (60, 70),
+                    "hum_range": (0, 100),
+                    "hum_good": (45, 55),
+                    "vpd_range": (0, 3),
+                    "vpd_good": (0.8, 1.2)
+                },
+                # Another example: sensor ID "XYZ987"
+                "XYZ987": {
+                    "temp_range": (32, 100),
+                    "temp_good": (55, 65),
+                    "hum_range": (0, 100),
+                    "hum_good": (45, 65),
+                    "vpd_range": (0, 3),
+                    "vpd_good": (0.8, 1.5)
+                },
+                # ... add more if needed ...
+            }
+            # ---------------------------------------------
+
             for sid, meta in sensors.items():
                 sensor_name = meta.get("name", sid)
                 battery = meta.get("battery_voltage", None)
                 rssi = meta.get("rssi", None)
 
-                # placeholder
+                # We'll fetch the sensor-specific range config, if any
+                sensor_range_config = SENSOR_RANGES.get(sid, None)
+
+                # placeholder: display the card with no data yet
                 self.dashboard_tab.update_sensor_card(
                     sensor_id=sid,
                     sensor_name=sensor_name,
@@ -90,7 +121,8 @@ class MainWindow(QMainWindow):
                     vpd=None,
                     battery_voltage=battery,
                     timestamp_str="(no data)",
-                    signal_strength=rssi
+                    signal_strength=rssi,
+                    range_config=sensor_range_config,  # NEW (PER-SENSOR RANGES)
                 )
 
                 sample_list = samples_resp["sensors"].get(sid, [])
@@ -107,7 +139,7 @@ class MainWindow(QMainWindow):
                 iso_time = latest["observed"]  # e.g. "2025-01-19T17:40:12.000Z"
                 local_str = parse_utc_iso8601_to_local(iso_time)
 
-                # store the original iso_time or local_str in DB, up to you
+                # store the original iso_time or local_str in DB
                 insert_sensor_data(sid, iso_time, temp_f, hum, vpd_val)
 
                 # now update with real data
@@ -119,7 +151,8 @@ class MainWindow(QMainWindow):
                     vpd=vpd_val,
                     battery_voltage=battery,
                     timestamp_str=local_str,  # show local time
-                    signal_strength=rssi
+                    signal_strength=rssi,
+                    range_config=sensor_range_config,  # NEW (PER-SENSOR RANGES)
                 )
         except Exception as e:
             print(f"Error polling sensors: {e}")

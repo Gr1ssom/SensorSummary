@@ -1,18 +1,23 @@
 # sensor_card.py
 
-from PyQt6.QtWidgets import QFrame, QLabel, QHBoxLayout, QVBoxLayout, QFrame
-from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QFrame, QLabel, QHBoxLayout, QVBoxLayout, QFrame, QToolButton
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QIcon
 from range_bar import RangeBar
 
 class SensorCardWidget(QFrame):
     """
     A "card" widget for each sensor. It includes:
       - A color box in the top-left
+      - A star icon to mark favorite
       - Sensor name, battery voltage, and signal strength in the top row
       - "LAST READING" timestamp in the second row
       - A horizontal separator line
       - 3 rows (Temp, Humidity, VPD) each with label above a big numeric value, and a RangeBar to the right
     """
+
+    # Our custom signal for "favorited" toggles
+    favoriteToggled = pyqtSignal(str, bool)  # will emit (sensor_id, is_favorite)
 
     def __init__(self, sensor_id, sensor_name):
         super().__init__()
@@ -32,6 +37,9 @@ class SensorCardWidget(QFrame):
             }
         """)
 
+        # By default, let's assume not favorite
+        self._is_favorite = False  
+
         # Main vertical layout
         self.main_layout = QVBoxLayout()
         self.setLayout(self.main_layout)
@@ -43,18 +51,25 @@ class SensorCardWidget(QFrame):
         # 1) A color box (e.g. green square) on the left
         self.color_box = QFrame()
         self.color_box.setFixedSize(24, 24)
-        # We'll default to green until we find an out-of-range sample
         self.color_box.setStyleSheet("background-color: #28a745; border-radius: 4px;")
         self.header_layout.addWidget(self.color_box)
 
-        # 2) Sensor name + possibly sensor type or other info on the same line
+        # 1b) A star toggle button
+        self.star_button = QToolButton()
+        self.star_button.setCheckable(True)
+        self.star_button.setAutoRaise(True)
+        self._update_star_icon()
+        self.star_button.toggled.connect(self._on_star_toggled)
+        self.header_layout.addWidget(self.star_button)
+
+        # 2) Sensor name label
         self.name_label = QLabel(sensor_name)
         self.name_label.setStyleSheet("font-size: 14pt; font-weight: bold;")
         self.header_layout.addWidget(self.name_label)
 
         self.header_layout.addStretch()
 
-        # 3) Battery, signal, etc. on the top-right
+        # 3) Battery + signal
         self.battery_label = QLabel("3.00V")
         self.battery_label.setStyleSheet("font-size: 10pt;")
         self.header_layout.addWidget(self.battery_label)
@@ -62,11 +77,6 @@ class SensorCardWidget(QFrame):
         self.signal_label = QLabel("\U0001F4F6")  # '📶'
         self.signal_label.setStyleSheet("font-size: 10pt; margin-left: 8px;")
         self.header_layout.addWidget(self.signal_label)
-
-        # 4) Another label for sensor type or short code, if desired (commented out by default)
-        # self.sensor_type_label = QLabel("HT.w")
-        # self.sensor_type_label.setStyleSheet("font-size: 10pt; margin-left: 8px;")
-        # self.header_layout.addWidget(self.sensor_type_label)
 
         # --- Timestamp row ---
         self.timestamp_label = QLabel("LAST READING: --/--")
@@ -79,7 +89,7 @@ class SensorCardWidget(QFrame):
         self.separator_line.setStyleSheet("color: #444444; margin-top: 6px; margin-bottom: 6px;")
         self.main_layout.addWidget(self.separator_line)
 
-        # Now create 3 "rows" for Temperature, Humidity, VPD
+        # 3 rows for Temp, Humidity, VPD
         self.readings_layout = QVBoxLayout()
         self.main_layout.addLayout(self.readings_layout)
 
@@ -93,11 +103,6 @@ class SensorCardWidget(QFrame):
         self.readings_layout.addLayout(self.vpd_row["layout"])
 
     def _create_reading_row(self, label_text, value_text):
-        """
-        Creates a layout with two main sections:
-          Left: vertical sub-layout for label_text (small) and value_text (big)
-          Right: the RangeBar
-        """
         row = {}
         row["layout"] = QHBoxLayout()
         row["layout"].setSpacing(10)
@@ -127,29 +132,60 @@ class SensorCardWidget(QFrame):
                     vpd=None,
                     battery_voltage=None,
                     timestamp_str=None,
-                    signal_strength=None):
+                    signal_strength=None,
+                    range_config=None):  # <-- NEW (PER-SENSOR RANGES)
         """
         Called by poll_sensors to update the displayed values in the card.
         Also checks how many readings are out of range in total:
           - 0 => color box = green
           - 1 => color box = yellow
           - 2+ => color box = red
+
+        range_config: optional dict:
+          {
+            "temp_range": (min_t, max_t),
+            "temp_good": (good_min_t, good_max_t),
+            "hum_range": (min_h, max_h),
+            "hum_good": (good_min_h, good_max_h),
+            "vpd_range": (min_v, max_v),
+            "vpd_good": (good_min_v, good_max_v)
+          }
+        If None, we'll fall back to some default.
         """
 
         # We'll track how many readings are "out of range"
         out_of_range_count = 0
 
+        # Possibly read from range_config if provided
+        if range_config is not None:
+            temp_min, temp_max = range_config.get("temp_range", (32, 100))
+            temp_good_min, temp_good_max = range_config.get("temp_good", (60, 70))
+
+            hum_min, hum_max = range_config.get("hum_range", (0, 100))
+            hum_good_min, hum_good_max = range_config.get("hum_good", (45, 55))
+
+            vpd_min, vpd_max = range_config.get("vpd_range", (0, 3))
+            vpd_good_min, vpd_good_max = range_config.get("vpd_good", (0.8, 1.2))
+        else:
+            # Fallback defaults if nothing is passed
+            temp_min, temp_max = (32, 100)
+            temp_good_min, temp_good_max = (55, 65)
+
+            hum_min, hum_max = (0, 100)
+            hum_good_min, hum_good_max = (45, 65)
+
+            vpd_min, vpd_max = (0, 3)
+            vpd_good_min, vpd_good_max = (0.8, 1.2)
+
         # ---- TEMPERATURE ----
         if temp_f is not None:
             self.temp_row["value_label"].setText(f"{temp_f:.1f}°F")
             bar = self.temp_row["bar"]
-            # Example: 32–100 range, 55–65 as "good"
-            bar.setRange(32, 100)
-            bar.setGoodRange(55, 65)
+            bar.setRange(temp_min, temp_max)
+            bar.setGoodRange(temp_good_min, temp_good_max)
             bar.setValue(temp_f)
 
-            # Is temperature out of the "good" band?
-            if temp_f < 55 or temp_f > 65:
+            if temp_f < temp_good_min or temp_f > temp_good_max:
                 out_of_range_count += 1
                 bar.setMarkerColor("red")
             else:
@@ -159,11 +195,11 @@ class SensorCardWidget(QFrame):
         if humidity is not None:
             self.hum_row["value_label"].setText(f"{humidity:.1f}%")
             bar = self.hum_row["bar"]
-            bar.setRange(0, 100)
-            bar.setGoodRange(45, 65)
+            bar.setRange(hum_min, hum_max)
+            bar.setGoodRange(hum_good_min, hum_good_max)
             bar.setValue(humidity)
 
-            if humidity < 45 or humidity > 65:
+            if humidity < hum_good_min or humidity > hum_good_max:
                 out_of_range_count += 1
                 bar.setMarkerColor("red")
             else:
@@ -173,11 +209,11 @@ class SensorCardWidget(QFrame):
         if vpd is not None:
             self.vpd_row["value_label"].setText(f"{vpd:.2f}kPa")
             bar = self.vpd_row["bar"]
-            bar.setRange(0, 3)
-            bar.setGoodRange(0.8, 1.2)
+            bar.setRange(vpd_min, vpd_max)
+            bar.setGoodRange(vpd_good_min, vpd_good_max)
             bar.setValue(vpd)
 
-            if vpd < 0.8 or vpd > 1.2:
+            if vpd < vpd_good_min or vpd > vpd_good_max:
                 out_of_range_count += 1
                 bar.setMarkerColor("red")
             else:
@@ -189,20 +225,32 @@ class SensorCardWidget(QFrame):
 
         # ---- TIMESTAMP ----
         if timestamp_str:
-            # e.g. "2025-01-19 12:40:12 EST"
             self.timestamp_label.setText(f"LAST READING: {timestamp_str}")
 
         # If you want to do something with signal_strength, you can set an icon, etc.
         if signal_strength is not None:
             pass
 
-        # NEW: Adjust the color box if 1 or 2+ readings are out of range
+        # Adjust the color box if 1 or 2+ readings are out of range
         if out_of_range_count == 0:
-            # Green
             self.color_box.setStyleSheet("background-color: #28a745; border-radius: 4px;")
         elif out_of_range_count == 1:
-            # Yellow
             self.color_box.setStyleSheet("background-color: #FFFF00; border-radius: 4px;")
         else:
-            # Red (2 or more)
             self.color_box.setStyleSheet("background-color: #FF0000; border-radius: 4px;")
+
+    def isFavorite(self):
+        return self._is_favorite
+
+    def _on_star_toggled(self, checked):
+        self._is_favorite = checked
+        self._update_star_icon()
+        self.favoriteToggled.emit(self.sensor_id, self._is_favorite)
+
+    def _update_star_icon(self):
+        if self._is_favorite:
+            self.star_button.setStyleSheet("color: #FFD700;")
+            self.star_button.setText("★")
+        else:
+            self.star_button.setStyleSheet("color: #AAAAAA;")
+            self.star_button.setText("☆")
