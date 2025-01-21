@@ -31,6 +31,9 @@ class RangeBar(QWidget):
         self.setMinimumHeight(28)
         self.setMaximumHeight(36)
 
+        # NEW: Store marker color so we can change it on the fly.
+        self._markerColor = "#00FF00"
+
     def setRange(self, min_val, max_val):
         self.min_val = min_val
         self.max_val = max_val
@@ -43,6 +46,11 @@ class RangeBar(QWidget):
 
     def setValue(self, value):
         self.current_value = value
+        self.update()
+
+    # NEW: A method to set the marker color from sensor_card.py
+    def setMarkerColor(self, color_str):
+        self._markerColor = color_str
         self.update()
 
     def paintEvent(self, event):
@@ -92,7 +100,8 @@ class RangeBar(QWidget):
                              marker_width,
                              marker_height)
 
-        painter.setBrush(QColor("#00FF00"))  # bright green marker
+        # NEW: Use self._markerColor, possibly set to red if out-of-range
+        painter.setBrush(QColor(self._markerColor))
         painter.drawRoundedRect(marker_rect, 3, 3)
 
         painter.end()
