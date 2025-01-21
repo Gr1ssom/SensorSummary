@@ -6,8 +6,10 @@ import math
 import time
 from datetime import datetime, timedelta, timezone
 
-from PyQt6.QtWidgets import QApplication, QMainWindow, QTabWidget, QToolBar
-from PyQt6.QtGui import QAction
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QTabWidget, QWidget,
+    QLineEdit, QPushButton, QHBoxLayout, QVBoxLayout, QLabel
+)
 from PyQt6.QtCore import QTimer, QThreadPool
 from dotenv import load_dotenv
 
@@ -15,7 +17,7 @@ from sensorpush_api import SensorPushAPI
 from data_store import init_db, insert_sensor_data
 from dashboard_tab import DashboardTab
 from graph_tab import GraphTab
-from sensor_poll_worker import SensorPollWorker  # If you're using the threaded approach
+from sensor_poll_worker import SensorPollWorker  # if you’re using the non-blocking approach
 
 def calculate_vpd(temp_f, relative_humidity):
     temp_c = (temp_f - 32) * 5.0 / 9.0
@@ -36,46 +38,75 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.api = api
 
-        self.setWindowTitle("SensorPush Desktop (Non-Blocking Poll + Larger UI)")
+        self.setWindowTitle("SensorPush Desktop (Search at Top + Refresh at Top)")
 
-        # A tabbed UI
+        # Create the top-level container widget
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container.setLayout(container_layout)
+
+        # --- TOP PANEL with Search box (orange area) + "Refresh Data" (green area) ---
+        top_panel = QHBoxLayout()
+        container_layout.addLayout(top_panel)
+
+        # 1) Label + Search box
+        lbl = QLabel("Search:")
+        lbl.setStyleSheet("font-size: 14pt; font-weight: bold;")
+        top_panel.addWidget(lbl)
+
+        self.search_box = QLineEdit()
+        self.search_box.setStyleSheet("font-size: 14pt;")
+        self.search_box.setFixedWidth(300)
+        self.search_box.setPlaceholderText("Type sensor name...")
+        top_panel.addWidget(self.search_box)
+
+        # 2) Refresh Button
+        self.refresh_button = QPushButton("Refresh Data")
+        self.refresh_button.setStyleSheet("font-size: 12pt;")
+        self.refresh_button.clicked.connect(self.start_poll_sensors)
+        top_panel.addWidget(self.refresh_button)
+
+        # Stretch so the search & refresh stay on the left
+        top_panel.addStretch()
+
+        # --- TABS (Dashboard + Graphs) ---
         self.tabs = QTabWidget()
-        self.dashboard_tab = DashboardTab()
+        self.dashboard_tab = DashboardTab(api=self.api)
         self.graph_tab = GraphTab()
+
         self.tabs.addTab(self.dashboard_tab, "Dashboard")
         self.tabs.addTab(self.graph_tab, "Graphs")
-        self.setCentralWidget(self.tabs)
 
-        # NEW: Enlarge the tab font via stylesheet
+        container_layout.addWidget(self.tabs)
+
+        # We'll enlarge tab fonts for clarity
         self.tabs.setStyleSheet("""
             QTabBar::tab {
-                font-size: 14pt;      /* Increase tab label font */
-                min-height: 40px;     /* Make tabs taller */
-                min-width: 100px;     /* Make tabs wider */
+                font-size: 14pt;
+                min-height: 40px;
+                min-width: 100px;
             }
         """)
 
-        # Toolbar with a "Refresh Data" button
-        toolbar = QToolBar("Main Toolbar")
-        self.addToolBar(toolbar)
-        refresh_action = QAction("Refresh Data", self)
-        refresh_action.triggered.connect(self.start_poll_sensors)
-        toolbar.addAction(refresh_action)
+        # Make container the central widget
+        self.setCentralWidget(container)
 
-        # A thread pool (if you're doing non-blocking calls)
+        # Connect the search box to the dashboard's filter
+        self.search_box.textChanged.connect(self.dashboard_tab.setSearchText)
+
+        # If you're doing background polling
         self.thread_pool = QThreadPool.globalInstance()
 
-        # Poll once on startup
+        # poll once on startup
         self.start_poll_sensors()
 
         # Then poll every 10 seconds
         self.timer = QTimer()
-        self.timer.setInterval(10 * 1000)  # 10 seconds
+        self.timer.setInterval(10 * 1000)
         self.timer.timeout.connect(self.start_poll_sensors)
         self.timer.start()
 
     def start_poll_sensors(self):
-        # Example of a background approach:
         now_utc = datetime.utcnow()
         start_utc = now_utc - timedelta(days=1)
         start_str = start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -88,6 +119,7 @@ class MainWindow(QMainWindow):
         self.thread_pool.start(worker)
 
     def _on_poll_result(self, sensors, samples_resp):
+        # update graph combos, update dashboard
         self.graph_tab.populate_sensors(sensors)
 
         for sid, meta in sensors.items():
@@ -95,7 +127,6 @@ class MainWindow(QMainWindow):
             battery = meta.get("battery_voltage", None)
             rssi = meta.get("rssi", None)
 
-            # placeholder
             self.dashboard_tab.update_sensor_card(
                 sensor_id=sid,
                 sensor_name=sensor_name,
@@ -155,7 +186,7 @@ def main():
 
     app = QApplication(sys.argv)
     window = MainWindow(api)
-    window.resize(1200, 800)
+    window.resize(1300, 900)
     window.show()
     sys.exit(app.exec())
 
